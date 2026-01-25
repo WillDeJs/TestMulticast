@@ -1,3 +1,4 @@
+#![windows_subsystem = "windows"]
 pub use cosmic::app::Settings;
 pub use mctest::gui::App;
 fn main() {

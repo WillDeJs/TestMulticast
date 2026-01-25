@@ -186,10 +186,12 @@ impl cosmic::Application for App {
                 self.ascii_output = text_editor::Content::new();
             }
             Message::NewRow(multicast_message) => {
+                let mut inserted = false;
                 self.all_rows.push(multicast_message.clone());
                 let query = self.search_query.trim();
                 if query.is_empty() {
                     let _ = self.results_table_model.insert(multicast_message);
+                    inserted = true;
                 } else {
                     let string_time = multicast_message
                         .time_stamp
@@ -201,9 +203,10 @@ impl cosmic::Application for App {
                         || multicast_message.src.contains(query)
                     {
                         let _ = self.results_table_model.insert(multicast_message);
+                        inserted = true;
                     }
                 }
-                let scroll_task = if self.auto_scroll {
+                let scroll_task = if self.auto_scroll && inserted {
                     cosmic::iced::widget::scrollable::snap_to(
                         id::Id::new("results-table"),
                         RelativeOffset::END,
