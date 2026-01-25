@@ -1,5 +1,7 @@
 fn main() {
-    if std::env::var_os("CARGO_CFG_WINDOWS").is_some() {
-        println!("cargo:rustc-link-lib=./assets/res");
+    if let Ok(os) = std::env::var("CARGO_CFG_TARGET_OS") {
+        if os == "windows" {
+            println!("cargo:rustc-link-lib=./assets/res");
+        }
     }
 }
