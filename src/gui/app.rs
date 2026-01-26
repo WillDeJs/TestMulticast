@@ -33,7 +33,7 @@ use cosmic::{
 };
 use cosmic::{iced::id, widget::scrollable};
 
-const MAX_PACKET_COUNT: usize = 512;
+const MAX_PACKET_COUNT: usize = 1000;
 pub struct App {
     core: Core,
     ip_address: String,
@@ -45,6 +45,7 @@ pub struct App {
     results_table_model: table::SingleSelectModel<MulticastMessage, MulticastTableHeader>,
     detailed_output: text_editor::Content,
     registered: bool,
+    interfaces_connected: usize,
     search_query: String,
     auto_scroll: bool,
     sender: Option<Sender<ListenerEvent>>,
@@ -52,6 +53,7 @@ pub struct App {
     dialog_message: String,
     all_rows: Vec<MulticastMessage>,
     warning: Option<String>,
+    showing_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -70,7 +72,7 @@ pub enum Message {
     NewRow(MulticastMessage),
     RegisterFail(String),
     CommError(String),
-    RegisterSuccess,
+    RegisterSuccess(usize),
     Disconnected,
     ChangeAutoScroll(bool),
     SearchChange(String),
@@ -143,9 +145,6 @@ impl cosmic::Application for App {
             }
             Message::CategorySelect(_) => {}
             Message::Register => {
-                // initialize upon  registration
-                self.all_rows.clear();
-                self.results_table_model.clear();
                 if self.sender.is_some() {
                     let ip = self.ip_address.clone();
                     let port = self.port.clone();
@@ -167,7 +166,7 @@ impl cosmic::Application for App {
                 }
             }
             Message::SendData => {
-                if self.sender.is_some() {
+                if self.sender.is_some() && !self.send_data.trim().is_empty() {
                     let ip = self.ip_address.clone();
                     let port = self.port.clone();
                     let data = self.send_data.clone();
@@ -184,12 +183,14 @@ impl cosmic::Application for App {
                 self.results_table_model.clear();
                 self.detailed_output = text_editor::Content::new();
                 self.ascii_output = text_editor::Content::new();
+                self.showing_count = 0;
             }
             Message::NewRow(multicast_message) => {
                 let mut inserted = false;
                 self.all_rows.push(multicast_message.clone());
                 let query = self.search_query.trim();
                 if query.is_empty() {
+                    self.showing_count += 1;
                     let _ = self.results_table_model.insert(multicast_message);
                     inserted = true;
                 } else {
@@ -203,6 +204,7 @@ impl cosmic::Application for App {
                         || multicast_message.src.contains(query)
                     {
                         let _ = self.results_table_model.insert(multicast_message);
+                        self.showing_count += 1;
                         inserted = true;
                     }
                 }
@@ -226,17 +228,24 @@ impl cosmic::Application for App {
                 return Task::batch([scroll_task, warning_task]);
             }
             Message::RegisterFail(error) => {
-                self.dialog_message = error;
+                self.dialog_message.push_str(&error);
                 self.dialog_type = DialogType::Error;
             }
-            Message::RegisterSuccess => {
+            Message::RegisterSuccess(connections) => {
+                self.all_rows.clear();
+                self.results_table_model.clear();
+                self.interfaces_connected = connections;
                 self.registered = true;
+                self.warning = None;
+                self.detailed_output = text_editor::Content::new();
+                self.ascii_output = text_editor::Content::new();
+                self.showing_count = 0;
             }
             Message::Disconnected => {
                 self.registered = false;
             }
             Message::CommError(error) => {
-                self.dialog_message = error;
+                self.dialog_message.push_str(&error);
                 self.dialog_type = DialogType::Error;
             }
             Message::Ready(sender) => {
@@ -254,15 +263,21 @@ impl cosmic::Application for App {
             }
             Message::SearchChange(query) => self.search_query = query,
             Message::SearchQuery(query) => {
-                self.results_table_model.clear();
-                for row in &self.all_rows {
-                    let string_time = row.time_stamp.format(data::TIME_FORMAT).to_string();
-                    let string_data = String::from_utf8_lossy(&row.bytes).to_string();
-                    if string_time.contains(&query)
-                        || string_data.contains(&query)
-                        || row.src.contains(&query)
-                    {
-                        let _ = self.results_table_model.insert(row.clone());
+                if !query.trim().is_empty() {
+                    self.showing_count = 0;
+                    self.results_table_model.clear();
+                    for row in &self.all_rows {
+                        let string_time = row.time_stamp.format(data::TIME_FORMAT).to_string();
+                        let string_data = String::from_utf8_lossy(&row.bytes).to_string();
+                        if string_time.contains(&query)
+                            || string_data.contains(&query)
+                            || row.src.contains(&query)
+                            || row.local_ip.contains(&query)
+                            || row.interface.contains(&query)
+                        {
+                            let _ = self.results_table_model.insert(row.clone());
+                            self.showing_count += 1;
+                        }
                     }
                 }
             }
@@ -287,7 +302,7 @@ impl cosmic::Application for App {
             core,
             ip_address: "".to_owned(),
             port: "".to_owned(),
-            ttl: "5".to_owned(),
+            ttl: "255".to_owned(),
             send_data: "".to_owned(),
             ascii_output: text_editor::Content::new(),
             table_header: table::Model::new(MulticastTableHeader::ALL_VIS.to_vec()),
@@ -301,6 +316,8 @@ impl cosmic::Application for App {
             dialog_message: String::new(),
             all_rows: Vec::new(),
             warning: None,
+            interfaces_connected: 0,
+            showing_count: 0,
         };
         app.results_table_model
             .sort(MulticastTableHeader::Time, false);
@@ -429,9 +446,11 @@ impl cosmic::Application for App {
                     .push(text("Auto-Scroll"))
                     .push(auto_scroll_toggle)
                     .push(text(format!("Captured: {} Packets", self.all_rows.len())))
+                    .push(text(format!("Showing: {} Packets", self.showing_count)))
+                    .push(text(format!("Interfaces: {}.", self.interfaces_connected)))
                     .push(row().width(Length::Fill))
                     .push(clear_button)
-                    .spacing(10)
+                    .spacing(30)
                     .align_y(Alignment::Center),
             )
             .push(

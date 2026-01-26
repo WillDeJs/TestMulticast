@@ -12,13 +12,19 @@ pub struct MulticastMessage {
     pub(crate) time_stamp: DateTime<Local>,
     pub(crate) src: String,
     pub(crate) bytes: Vec<u8>,
+    pub(crate) local_ip: String,
+    pub(crate) interface: String,
 }
 impl table::ItemCategory for MulticastTableHeader {
     fn width(&self) -> cosmic::iced::Length {
         match self {
             MulticastTableHeader::Time | MulticastTableHeader::TimeInv => Length::Fixed(200.),
             MulticastTableHeader::Src | MulticastTableHeader::SrcInv => Length::Fixed(200.),
-            MulticastTableHeader::Data | MulticastTableHeader::DataInv => Length::FillPortion(100),
+            MulticastTableHeader::Interface | MulticastTableHeader::InterfaceInv => {
+                Length::Fixed(200.)
+            }
+            MulticastTableHeader::LocalIp | MulticastTableHeader::LocalIpInv => Length::Fixed(200.),
+            MulticastTableHeader::Data | MulticastTableHeader::DataInv => Length::FillPortion(50),
         }
     }
 }
@@ -37,7 +43,13 @@ impl table::ItemInterface<MulticastTableHeader> for MulticastMessage {
                 std::borrow::Cow::Owned(net_util_data_hexdump(&self.bytes))
             }
             MulticastTableHeader::Src | MulticastTableHeader::SrcInv => {
-                std::borrow::Cow::Owned(self.src.to_string())
+                std::borrow::Cow::Owned(self.src.clone())
+            }
+            MulticastTableHeader::Interface | MulticastTableHeader::InterfaceInv => {
+                std::borrow::Cow::Owned(self.interface.clone())
+            }
+            MulticastTableHeader::LocalIp | MulticastTableHeader::LocalIpInv => {
+                std::borrow::Cow::Owned(self.local_ip.clone())
             }
         }
     }
@@ -51,21 +63,31 @@ impl table::ItemInterface<MulticastTableHeader> for MulticastMessage {
                 self.bytes.cmp(&other.bytes)
             }
             MulticastTableHeader::Src | MulticastTableHeader::SrcInv => self.src.cmp(&other.src),
+            MulticastTableHeader::Interface | MulticastTableHeader::InterfaceInv => {
+                self.interface.cmp(&other.interface)
+            }
+            MulticastTableHeader::LocalIp | MulticastTableHeader::LocalIpInv => {
+                self.local_ip.cmp(&other.local_ip)
+            }
         }
     }
 }
 
 impl MulticastTableHeader {
     // Invisible headers
-    pub const ALL_INV: [Self; 3] = [
+    pub const ALL_INV: [Self; 5] = [
         MulticastTableHeader::TimeInv,
         MulticastTableHeader::SrcInv,
+        MulticastTableHeader::InterfaceInv,
+        MulticastTableHeader::LocalIpInv,
         MulticastTableHeader::DataInv,
     ];
     // visible headers
-    pub const ALL_VIS: [Self; 3] = [
+    pub const ALL_VIS: [Self; 5] = [
         MulticastTableHeader::Time,
         MulticastTableHeader::Src,
+        MulticastTableHeader::Interface,
+        MulticastTableHeader::LocalIp,
         MulticastTableHeader::Data,
     ];
 }
@@ -78,6 +100,10 @@ impl Display for MulticastTableHeader {
             MulticastTableHeader::TimeInv => write!(f, ""),
             MulticastTableHeader::SrcInv => write!(f, ""),
             MulticastTableHeader::DataInv => write!(f, ""),
+            MulticastTableHeader::Interface => write!(f, "NIC"),
+            MulticastTableHeader::InterfaceInv => write!(f, ""),
+            MulticastTableHeader::LocalIp => write!(f, "Local NIC IP"),
+            MulticastTableHeader::LocalIpInv => write!(f, ""),
         }
     }
 }
@@ -90,6 +116,10 @@ pub enum MulticastTableHeader {
     TimeInv,
     SrcInv,
     DataInv,
+    Interface,
+    InterfaceInv,
+    LocalIp,
+    LocalIpInv,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
