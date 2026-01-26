@@ -188,7 +188,7 @@ impl cosmic::Application for App {
             Message::NewRow(multicast_message) => {
                 let mut inserted = false;
                 self.all_rows.push(multicast_message.clone());
-                let query = self.search_query.trim();
+                let query = self.search_query.trim().to_lowercase();
                 if query.is_empty() {
                     self.showing_count += 1;
                     let _ = self.results_table_model.insert(multicast_message);
@@ -198,10 +198,14 @@ impl cosmic::Application for App {
                         .time_stamp
                         .format(data::TIME_FORMAT)
                         .to_string();
-                    let string_data = String::from_utf8_lossy(&multicast_message.bytes).to_string();
-                    if string_time.contains(query)
-                        || string_data.contains(query)
-                        || multicast_message.src.contains(query)
+                    let string_data = String::from_utf8_lossy(&multicast_message.bytes)
+                        .to_string()
+                        .to_lowercase();
+                    if string_time.contains(&query)
+                        || string_data.contains(&query)
+                        || multicast_message.src.to_lowercase().contains(&query)
+                        || multicast_message.local_ip.to_lowercase().contains(&query)
+                        || multicast_message.interface.to_lowercase().contains(&query)
                     {
                         let _ = self.results_table_model.insert(multicast_message);
                         self.showing_count += 1;
@@ -263,16 +267,17 @@ impl cosmic::Application for App {
             }
             Message::SearchChange(query) => self.search_query = query,
             Message::SearchQuery(query) => {
+                let query = query.trim().to_lowercase();
                 self.showing_count = 0;
                 self.results_table_model.clear();
                 for row in &self.all_rows {
                     let string_time = row.time_stamp.format(data::TIME_FORMAT).to_string();
                     let string_data = String::from_utf8_lossy(&row.bytes).to_string();
                     if string_time.contains(&query)
-                        || string_data.contains(&query)
-                        || row.src.contains(&query)
-                        || row.local_ip.contains(&query)
-                        || row.interface.contains(&query)
+                        || string_data.to_lowercase().contains(&query)
+                        || row.src.to_lowercase().contains(&query)
+                        || row.local_ip.to_lowercase().contains(&query)
+                        || row.interface.to_lowercase().contains(&query)
                     {
                         let _ = self.results_table_model.insert(row.clone());
                         self.showing_count += 1;
