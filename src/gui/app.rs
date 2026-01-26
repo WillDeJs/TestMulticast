@@ -263,21 +263,19 @@ impl cosmic::Application for App {
             }
             Message::SearchChange(query) => self.search_query = query,
             Message::SearchQuery(query) => {
-                if !query.trim().is_empty() {
-                    self.showing_count = 0;
-                    self.results_table_model.clear();
-                    for row in &self.all_rows {
-                        let string_time = row.time_stamp.format(data::TIME_FORMAT).to_string();
-                        let string_data = String::from_utf8_lossy(&row.bytes).to_string();
-                        if string_time.contains(&query)
-                            || string_data.contains(&query)
-                            || row.src.contains(&query)
-                            || row.local_ip.contains(&query)
-                            || row.interface.contains(&query)
-                        {
-                            let _ = self.results_table_model.insert(row.clone());
-                            self.showing_count += 1;
-                        }
+                self.showing_count = 0;
+                self.results_table_model.clear();
+                for row in &self.all_rows {
+                    let string_time = row.time_stamp.format(data::TIME_FORMAT).to_string();
+                    let string_data = String::from_utf8_lossy(&row.bytes).to_string();
+                    if string_time.contains(&query)
+                        || string_data.contains(&query)
+                        || row.src.contains(&query)
+                        || row.local_ip.contains(&query)
+                        || row.interface.contains(&query)
+                    {
+                        let _ = self.results_table_model.insert(row.clone());
+                        self.showing_count += 1;
                     }
                 }
             }
