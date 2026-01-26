@@ -11,7 +11,7 @@ This tool is very simple thus it's very limited on the features it provides. It 
 
 The main purpose of this tool is to test the ability to receive and send multicast messages on a given machine. This tool was simply born from the need of said tool while troubleshooting on site. It is meant to be a lightweight replacement for VLC stream testing.
 
-Note: The tool is not meant to run forever. After 512 messages are received in a session, the multicast group registration is terminated. This hard-coded limit is meant to avoid the tool using up too much resources. It is not expected that the tool would need tor un for days at at time.
+Note: The tool is not meant to run forever. After 1000 messages are received in a session, the multicast group registration is terminated. This hard-coded limit is meant to avoid the tool using up too much resources. It is not expected that the tool would need tor un for days at at time.
 
 ## Usage
 
