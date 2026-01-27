@@ -11,7 +11,7 @@ use crate::{
 use cosmic::{
     Action,
     iced_widget::scrollable::RelativeOffset,
-    widget::{table, warning},
+    widget::{table, table::model, warning},
 };
 use cosmic::{
     ApplicationExt, Apply, Core, Task,
@@ -54,6 +54,7 @@ pub struct App {
     all_rows: Vec<MulticastMessage>,
     warning: Option<String>,
     showing_count: usize,
+    showing_details: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -126,21 +127,28 @@ impl cosmic::Application for App {
             }
             Message::TestDataChange(data) => self.send_data = data,
             Message::ItemSelect(entity) => {
-                self.results_table_model.activate(entity);
-                if let Some(item) = self.results_table_model.item(entity) {
-                    let detailed_data = format!(
-                        "> At: {}\n> From: {}\n> Length: {} byte(s)\n> Hex Dump: {}",
-                        item.time_stamp.format(data::TIME_FORMAT),
-                        item.src,
-                        item.bytes.len(),
-                        &net_util_data_hexdump(&item.bytes)
-                    );
-                    self.detailed_output = text_editor::Content::with_text(&detailed_data);
-                    self.ascii_output =
-                        text_editor::Content::with_text(&net_util_data_ascii(&item.bytes))
-                } else {
+                let id = self.results_table_model.active();
+                // toggle details on and off if clicked again on same row
+                if entity == id {
+                    model::selection::Selectable::deactivate(&mut self.results_table_model, id);
                     self.detailed_output = text_editor::Content::new();
                     self.ascii_output = text_editor::Content::new();
+                    self.showing_details = false;
+                } else {
+                    self.results_table_model.activate(entity);
+                    if let Some(item) = self.results_table_model.item(entity) {
+                        let detailed_data = format!(
+                            "> At: {}\n> From: {}\n> Length: {} byte(s)\n> Hex Dump: {}",
+                            item.time_stamp.format(data::TIME_FORMAT),
+                            item.src,
+                            item.bytes.len(),
+                            &net_util_data_hexdump(&item.bytes)
+                        );
+                        self.detailed_output = text_editor::Content::with_text(&detailed_data);
+                        self.ascii_output =
+                            text_editor::Content::with_text(&net_util_data_ascii(&item.bytes));
+                        self.showing_details = true;
+                    }
                 }
             }
             Message::CategorySelect(_) => {}
@@ -184,6 +192,7 @@ impl cosmic::Application for App {
                 self.detailed_output = text_editor::Content::new();
                 self.ascii_output = text_editor::Content::new();
                 self.showing_count = 0;
+                self.showing_details = false;
             }
             Message::NewRow(multicast_message) => {
                 let mut inserted = false;
@@ -244,6 +253,7 @@ impl cosmic::Application for App {
                 self.detailed_output = text_editor::Content::new();
                 self.ascii_output = text_editor::Content::new();
                 self.showing_count = 0;
+                self.showing_details = false;
             }
             Message::Disconnected => {
                 self.registered = false;
@@ -321,6 +331,7 @@ impl cosmic::Application for App {
             warning: None,
             interfaces_connected: 0,
             showing_count: 0,
+            showing_details: false,
         };
         app.results_table_model
             .sort(MulticastTableHeader::Time, false);
@@ -456,11 +467,13 @@ impl cosmic::Application for App {
                     .spacing(30)
                     .align_y(Alignment::Center),
             )
-            .push(
+            .push(if self.showing_details {
                 row()
                     .push(row_detailed_view.height(200))
-                    .push(row_ascii_view.height(200)),
-            )
+                    .push(row_ascii_view.height(200))
+            } else {
+                row()
+            })
             .push(warning)
             .spacing(10)
             .padding(10)
