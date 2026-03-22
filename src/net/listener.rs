@@ -28,12 +28,6 @@ enum NetStatus {
     Stop,
 }
 
-struct NetworkConnection {
-    name: String,
-    ip: Ipv4Addr,
-    socket: UdpSocket,
-}
-
 pub struct Listener;
 
 impl Listener {
@@ -47,46 +41,36 @@ impl Listener {
                     let event = rx.select_next_some().await;
                     match event {
                         ListenerEvent::Register(ip, port, ttl) => {
-                            let mut combined_error = String::new();
                             let all_interfaces = Self::get_all_ipv4_local_addresses();
-                            let mut connections = Vec::<NetworkConnection>::new();
-                            for (interface, local_ip) in all_interfaces.iter() {
-                                let socket = match Self::multicast_registration_one_interface(
-                                    &ip, &port, &ttl, local_ip,
+                            let all_local_ips: Vec<Ipv4Addr> =
+                                all_interfaces.values().cloned().collect();
+
+                            let (socket, registered) =
+                                match Self::multicast_registration_all_interfaces(
+                                    &ip,
+                                    &port,
+                                    &ttl,
+                                    &all_local_ips,
                                 ) {
                                     Ok(socket) => socket,
                                     Err(error) => {
-                                        combined_error
-                                            .push_str(&format!("{interface} -> {error}\n"));
+                                        let _ = output.send(Message::RegisterFail(error)).await;
                                         continue;
                                     }
                                 };
-                                connections.push(NetworkConnection {
-                                    name: interface.clone(),
-                                    ip: *local_ip,
-                                    socket,
-                                });
-                            }
-                            if connections.is_empty() {
-                                let _ = output.send(Message::RegisterFail(combined_error)).await;
+
+                            if registered == 0 {
+                                let _ = output.send(Message::RegisterFail("Failed to register on any interface".to_owned())).await;
                                 continue;
                             } else {
-                                let _ = output
-                                    .send(Message::RegisterSuccess(connections.len()))
-                                    .await;
+                                let _ = output.send(Message::RegisterSuccess(registered)).await;
                             }
 
                             loop {
-                                let event_handle = Self::check_for_gui_events(
-                                    &connections,
-                                    &mut rx,
-                                    output.clone(),
-                                );
-                                let data_handle = Self::handle_data_receive(
-                                    &connections,
-                                    &mut buffer,
-                                    output.clone(),
-                                );
+                                let event_handle =
+                                    Self::check_for_gui_events(&socket, &mut rx, output.clone());
+                                let data_handle =
+                                    Self::handle_data_receive(&socket, &mut buffer, output.clone());
                                 let result = select! {
                                     result = data_handle.fuse() => {
                                         result
@@ -123,70 +107,51 @@ impl Listener {
     }
 
     async fn handle_data_receive(
-        connections: &Vec<NetworkConnection>,
+        socket: &UdpSocket,
         buffer: &mut Vec<u8>,
         mut output: Sender<Message>,
     ) -> NetStatus {
-        for connection in connections {
-            match connection.socket.try_recv_from(buffer) {
-                Ok((read, src)) => {
-                    let time_stamp = chrono::Local::now();
-                    let bytes = buffer[0..read].to_vec();
-                    let src = src.to_string();
-                    let local_ip = connection.ip.to_string();
-                    let interface = connection.name.clone();
-                    let multicast_message = MulticastMessage {
-                        time_stamp,
-                        local_ip,
-                        interface,
-                        src,
-                        bytes,
-                    };
-                    let _ = output.send(Message::NewRow(multicast_message)).await;
-                }
-                Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                    // our socket is non-blocking, we simply continue
-                    // NetStatus::Continue
-                    continue;
-                }
-                Err(error) => {
-                    let _ = output
-                        .send(Message::CommError(format!(
-                            "Interface: `{}`, Addr: `{}` -> Error: `{}`",
-                            connection.name,
-                            connection.ip,
-                            error.to_string()
-                        )))
-                        .await;
-                }
+        match socket.try_recv_from(buffer) {
+            Ok((read, src)) => {
+                let time_stamp = chrono::Local::now();
+                let bytes = buffer[0..read].to_vec();
+                let src = src.to_string();
+                let multicast_message = MulticastMessage {
+                    time_stamp,
+                    src,
+                    bytes,
+                };
+                let _ = output.send(Message::NewRow(multicast_message)).await;
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                // our socket is non-blocking, we simply continu
+            }
+            Err(error) => {
+                let _ = output
+                    .send(Message::CommError(format!("Error: {error}")))
+                    .await;
             }
         }
         NetStatus::Continue
     }
+
     async fn check_for_gui_events(
-        connections: &Vec<NetworkConnection>,
+        socket: &UdpSocket,
         rx: &mut Receiver<ListenerEvent>,
         mut output: Sender<Message>,
     ) -> NetStatus {
         let event = rx.select_next_some().await;
+        println!("Received event from GUI: {:?}", event);
         match event {
             ListenerEvent::Register(_, _, _) => NetStatus::Continue,
             ListenerEvent::SendData(ip, port, data) => {
-                for connection in connections {
-                    if let Err(e) = connection
-                        .socket
-                        .send_to(&data.as_bytes(), &format!("{ip}:{port}"))
-                        .await
-                    {
-                        let _ = output
-                            .send(Message::CommError(format!(
-                                "Interface: `{}`, Addr: `{}` -> Error: `{}`",
-                                connection.name,
-                                connection.ip,
-                                e.to_string()
-                            )))
-                            .await;
-                    }
+                if let Err(e) = socket
+                    .send_to(&data.as_bytes(), &format!("{ip}:{port}"))
+                    .await
+                {
+                    let _ = output
+                        .send(Message::CommError(format!("Error -> {}", e.to_string())))
+                        .await;
                 }
                 NetStatus::Continue
             }
@@ -194,12 +159,13 @@ impl Listener {
         }
     }
 
-    fn multicast_registration_one_interface(
+    fn multicast_registration_all_interfaces(
         ip: &str,
         port: &str,
         ttl: &str,
-        iface: &Ipv4Addr,
-    ) -> Result<UdpSocket, String> {
+        interfacecs: &Vec<Ipv4Addr>,
+    ) -> Result<(UdpSocket, usize), String> {
+        let mut registered = 0;
         let port: u16 = port
             .parse()
             .map_err(|_| "Invalid port provided".to_owned())?;
@@ -209,13 +175,15 @@ impl Listener {
         let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
             .map_err(|e| e.to_string())?;
         // Local address bind it to a local port in any available interface
-        let local_address = SocketAddrV4::new(iface.clone(), port);
+        // let local_address = SocketAddrV4::new(iface.clone(), port);
+        let local_address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
 
         // Multicast address passed by the user
         let multicast_address = Ipv4Addr::from_str(&format!("{ip}")).map_err(|e| e.to_string())?;
 
         // allow reusing address (needed for MULTICAST)
         socket.set_reuse_address(true).map_err(|e| e.to_string())?;
+        // socket.set_reuse_port(true).map_err(|e| e.to_string())?;
 
         socket.set_ttl_v4(ttl).map_err(|e| e.to_string())?;
 
@@ -223,10 +191,15 @@ impl Listener {
         let bind_address = SockAddr::from(SocketAddr::V4(local_address));
         socket.bind(&bind_address).map_err(|e| e.to_string())?;
 
-        // register on multicast group
-        socket
-            .join_multicast_v4(&multicast_address, &iface)
-            .map_err(|e| e.to_string())?;
+        // register on multicast group for each interface
+        for iface in interfacecs {
+            println!(
+                "Successfully registered on interface `{iface}` with local address `{local_address}`"
+            );
+            if let Ok(()) = socket.join_multicast_v4(&multicast_address, &iface) {
+                registered += 1;
+            }
+        }
 
         // set non-blocking so that both our send and receive functions would work without contention (they share a socket)
         // this is needed because the select macro would poll both futures and we set socket to read, write a the same time
@@ -236,7 +209,7 @@ impl Listener {
         // Map to tokio socket so we can read it asynchronously
         let socket =
             UdpSocket::from_std(std::net::UdpSocket::from(socket)).map_err(|e| e.to_string())?;
-        Ok(socket)
+        Ok((socket, registered))
     }
 
     fn get_all_ipv4_local_addresses() -> HashMap<String, Ipv4Addr> {

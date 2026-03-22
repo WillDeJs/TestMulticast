@@ -213,8 +213,6 @@ impl cosmic::Application for App {
                     if string_time.contains(&query)
                         || string_data.contains(&query)
                         || multicast_message.src.to_lowercase().contains(&query)
-                        || multicast_message.local_ip.to_lowercase().contains(&query)
-                        || multicast_message.interface.to_lowercase().contains(&query)
                     {
                         let _ = self.results_table_model.insert(multicast_message);
                         self.showing_count += 1;
@@ -286,8 +284,6 @@ impl cosmic::Application for App {
                     if string_time.contains(&query)
                         || string_data.to_lowercase().contains(&query)
                         || row.src.to_lowercase().contains(&query)
-                        || row.local_ip.to_lowercase().contains(&query)
-                        || row.interface.to_lowercase().contains(&query)
                     {
                         let _ = self.results_table_model.insert(row.clone());
                         self.showing_count += 1;
@@ -363,7 +359,7 @@ impl cosmic::Application for App {
         } else {
             None
         };
-        let send_data_button = button::suggested("Send").on_press_maybe(send_command);
+        let send_data_button = button::suggested("Send").spacing(50).on_press_maybe(send_command);
         let data_text_input = text_input("Type ASCII data to send", &self.send_data)
             .on_input(Message::TestDataChange);
         let row_ascii_view = text_editor(&self.ascii_output)
