@@ -4,6 +4,7 @@ use crate::gui::Message;
 use crate::net::util::*;
 use chrono::{DateTime, Local};
 use cosmic::{iced::Length, widget::table};
+use csvlib::{CsvError, DocEntry, Row};
 
 pub const TIME_FORMAT: &str = "%Y-%m-%d %H:%M:%S.%3f";
 
@@ -12,6 +13,48 @@ pub struct MulticastMessage {
     pub(crate) time_stamp: DateTime<Local>,
     pub(crate) src: String,
     pub(crate) bytes: Vec<u8>,
+}
+impl From<MulticastMessage> for Row {
+    fn from(value: MulticastMessage) -> Self {
+        let timestamp = value.time_stamp.timestamp_millis().to_string();
+        let source = value.src;
+        let data = value
+            .bytes
+            .iter()
+            .map(|byte| format!("{:02X}", byte))
+            .collect::<Vec<String>>()
+            .join("");
+        csvlib::csv![timestamp, source, data]
+    }
+}
+
+impl TryFrom<DocEntry<'_>> for MulticastMessage {
+    type Error = CsvError;
+
+    fn try_from(value: DocEntry) -> Result<Self, Self::Error> {
+        let timestamp_millis: i64 = value.get("TIMESTAMP")?;
+        let source: String = value.get("SOURCE")?;
+        let data_str: String = value.get("DATA")?;
+
+        let time_stamp = DateTime::<Local>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(timestamp_millis as u64),
+        );
+        if data_str.chars().any(|c| !c.is_ascii_hexdigit()) {
+            Err(CsvError::Generic("DATA field contains non-hexadecimal characters".into()))
+        } else {
+            let bytes = (0..data_str.len())
+                .step_by(2)
+                // okay to unwrap here because we already checked for non-hex characters, and the length is guaranteed to be even
+                .map(|i| u8::from_str_radix(&data_str[i..i + 2], 16).unwrap_or_default())
+                .collect::<Vec<u8>>();
+
+            Ok(MulticastMessage {
+                time_stamp,
+                src: source,
+                bytes,
+            })
+        }
+    }
 }
 impl table::ItemCategory for MulticastTableHeader {
     fn width(&self) -> cosmic::iced::Length {
@@ -78,7 +121,6 @@ impl Display for MulticastTableHeader {
             MulticastTableHeader::TimeInv => write!(f, ""),
             MulticastTableHeader::SrcInv => write!(f, ""),
             MulticastTableHeader::DataInv => write!(f, ""),
-
         }
     }
 }

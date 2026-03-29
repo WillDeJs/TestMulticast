@@ -128,7 +128,7 @@ impl Listener {
             }
             Err(error) => {
                 let _ = output
-                    .send(Message::CommError(format!("Error: {error}")))
+                    .send(Message::ShowError(format!("Error: {error}")))
                     .await;
             }
         }
@@ -150,7 +150,7 @@ impl Listener {
                     .await
                 {
                     let _ = output
-                        .send(Message::CommError(format!("Error -> {}", e.to_string())))
+                        .send(Message::ShowError(format!("Error -> {}", e.to_string())))
                         .await;
                 }
                 NetStatus::Continue

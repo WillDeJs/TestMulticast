@@ -18,7 +18,10 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic.git", features = [
     "winit",
     "tokio",
     "iced_accessibility",
+    "rfd"
 ] }
 socket2 = "0.6.1"
 tokio-stream = "0.1.18"
 sysinfo = { version = "0.38.0", features = ["network"] }
+
+csvlib = {git = "https://github.com/WillDeJs/csvlib.git"}

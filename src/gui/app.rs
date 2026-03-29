@@ -8,10 +8,12 @@ use crate::{
         util::{net_util_data_ascii, net_util_data_hexdump},
     },
 };
+use cosmic::dialog::file_chooser::{self, FileFilter};
+use cosmic::widget::menu::action::MenuAction;
 use cosmic::{
     Action,
     iced_widget::scrollable::RelativeOffset,
-    widget::{table, table::model, warning},
+    widget::{RcElementWrapper, table, table::model, warning},
 };
 use cosmic::{
     ApplicationExt, Apply, Core, Task,
@@ -55,6 +57,7 @@ pub struct App {
     warning: Option<String>,
     showing_count: usize,
     showing_details: bool,
+    has_unsaved_changes: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +75,7 @@ pub enum Message {
     Empty,
     NewRow(MulticastMessage),
     RegisterFail(String),
-    CommError(String),
+    ShowError(String),
     RegisterSuccess(usize),
     Disconnected,
     ChangeAutoScroll(bool),
@@ -84,8 +87,28 @@ pub enum Message {
     DetailedOutputEdit(text_editor::Action),
     AsciiOutputEdit(text_editor::Action),
     CloseWarning,
+    DataSave,
+    DataLoad,
+    OutputFileSelected(String),
+    LoadFile(String),
+    DataLoaded(Vec<MulticastMessage>),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileMenuAction {
+    DataSave,
+    DataLoad,
+}
+
+impl MenuAction for FileMenuAction {
+    type Message = Message;
+    fn message(&self) -> Self::Message {
+        match self {
+            FileMenuAction::DataSave => Message::DataSave,
+            FileMenuAction::DataLoad => Message::DataLoad,
+        }
+    }
+}
 #[allow(unused)]
 #[derive(Debug, Clone, Default)]
 enum DialogType {
@@ -238,6 +261,15 @@ impl cosmic::Application for App {
                 };
                 return Task::batch([scroll_task, warning_task]);
             }
+            Message::DataLoaded(rows) => {
+                self.all_rows = rows.clone();
+                self.results_table_model.clear();
+                self.search_query.clear();
+                for row in rows {
+                    let _ = self.results_table_model.insert(row);
+                }
+                self.showing_count = self.all_rows.len();
+            }
             Message::RegisterFail(error) => {
                 self.dialog_message.push_str(&error);
                 self.dialog_type = DialogType::Error;
@@ -256,7 +288,7 @@ impl cosmic::Application for App {
             Message::Disconnected => {
                 self.registered = false;
             }
-            Message::CommError(error) => {
+            Message::ShowError(error) => {
                 self.dialog_message.push_str(&error);
                 self.dialog_type = DialogType::Error;
             }
@@ -301,6 +333,65 @@ impl cosmic::Application for App {
                     self.ascii_output.perform(action);
                 }
             }
+            Message::DataSave => {
+                return cosmic::task::future(async move {
+                    let filter = FileFilter::new("CSV File").extension("csv");
+                    let dialog = file_chooser::save::Dialog::new()
+                        .title("Save captured data".to_owned())
+                        .filter(filter);
+                    match dialog.save_file().await {
+                        Ok(response) => {
+                            if let Some(url) = response.url() {
+                                Message::OutputFileSelected(url.path().to_owned())
+                            } else {
+                                Message::ShowError("File not created".to_string())
+                            }
+                        }
+                        Err(cosmic::dialog::file_chooser::Error::Cancelled) => Message::NoOp,
+                        Err(e) => Message::ShowError(format!("File save error: {}", e.to_string())),
+                    }
+                });
+            }
+            Message::DataLoad => {
+                return cosmic::task::future(async move {
+                    let filter = FileFilter::new("CSV File").extension("csv");
+                    let dialog = file_chooser::open::Dialog::new()
+                        .title("Load captured data".to_owned())
+                        .filter(filter);
+                    match dialog.open_file().await {
+                        Ok(response) => Message::LoadFile(response.url().path().to_owned()),
+                        Err(cosmic::dialog::file_chooser::Error::Cancelled) => Message::NoOp,
+                        Err(e) => Message::ShowError(format!("File load error: {}", e.to_string())),
+                    }
+                });
+            }
+            Message::OutputFileSelected(url) => {
+                let rows = self.all_rows.clone();
+
+                return cosmic::task::future(async move {
+                    // Message::NoOp
+                    let result = tokio::task::spawn_blocking(move || {
+                        crate::gui::utils::gui_util_save_data_to_csv(rows, url)
+                    })
+                    .await;
+                    result.unwrap_or(Message::ShowError("Failed to save file.".to_string()))
+                })
+                .map(Action::App);
+            }
+            Message::LoadFile(url) => {
+                let rows = self.all_rows.clone();
+
+                return cosmic::task::future(async move {
+                    // Message::NoOp
+                    let result = tokio::task::spawn_blocking(move || {
+                        let rows = crate::gui::utils::gui_util_load_data_from_csv(url);
+                        rows
+                    })
+                    .await;
+                    result.unwrap_or(Message::ShowError("Failed to load file.".to_string()))
+                })
+                .map(Action::App);
+            }
         }
 
         Task::none()
@@ -328,6 +419,7 @@ impl cosmic::Application for App {
             interfaces_connected: 0,
             showing_count: 0,
             showing_details: false,
+            has_unsaved_changes: false,
         };
         app.results_table_model
             .sort(MulticastTableHeader::Time, false);
@@ -335,6 +427,20 @@ impl cosmic::Application for App {
         (app, Task::none())
     }
 
+    fn header_start(&self) -> Vec<cosmic::Element<'_, Self::Message>> {
+        let menu = menu::bar(vec![menu::Tree::with_children(
+            RcElementWrapper::new(Element::from(menu::root("File"))),
+            menu::items(
+                &HashMap::new(),
+                vec![
+                    menu::Item::Button("Save Data", None, FileMenuAction::DataSave),
+                    menu::Item::Button("Load Data", None, FileMenuAction::DataLoad),
+                ],
+            ),
+        )]);
+
+        vec![menu.into()]
+    }
     fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
         cosmic::iced::Subscription::run(listener::Listener::start)
     }
@@ -359,7 +465,9 @@ impl cosmic::Application for App {
         } else {
             None
         };
-        let send_data_button = button::suggested("Send").spacing(50).on_press_maybe(send_command);
+        let send_data_button = button::suggested("Send")
+            .spacing(50)
+            .on_press_maybe(send_command);
         let data_text_input = text_input("Type ASCII data to send", &self.send_data)
             .on_input(Message::TestDataChange);
         let row_ascii_view = text_editor(&self.ascii_output)

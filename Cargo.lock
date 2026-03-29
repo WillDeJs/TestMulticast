@@ -1151,6 +1151,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "csvlib"
+version = "0.1.0"
+source = "git+https://github.com/WillDeJs/csvlib.git#4b71c656c9978d27ce98fa4500ab74e0a534ce48"
+
+[[package]]
 name = "ctor-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2920,6 +2925,7 @@ name = "mctest"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "csvlib",
  "libcosmic",
  "socket2 0.6.1",
  "sysinfo",
