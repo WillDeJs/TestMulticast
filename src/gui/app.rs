@@ -8,10 +8,9 @@ use crate::{
         util::{net_util_data_ascii, net_util_data_hexdump},
     },
 };
-use cosmic::dialog::file_chooser::{self, FileFilter};
-use cosmic::widget::menu::action::MenuAction;
 use cosmic::{
     Action,
+    iced::Subscription,
     iced_widget::scrollable::RelativeOffset,
     widget::{RcElementWrapper, table, table::model, warning},
 };
@@ -33,6 +32,11 @@ use cosmic::{
         search_input, text, text_editor, text_input,
     },
 };
+use cosmic::{
+    dialog::file_chooser::{self, FileFilter},
+    iced::Event,
+};
+use cosmic::{iced::event, widget::menu::action::MenuAction};
 use cosmic::{iced::id, widget::scrollable};
 
 const MAX_PACKET_COUNT: usize = 1000;
@@ -91,7 +95,9 @@ pub enum Message {
     DataLoad,
     OutputFileSelected(String),
     LoadFile(String),
+    ConfirmClose,
     DataLoaded(Vec<MulticastMessage>),
+    WindowEvent(Event),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -115,6 +121,7 @@ enum DialogType {
     Warning,
     Info,
     Error,
+    Confirm,
     #[default]
     None,
 }
@@ -218,6 +225,7 @@ impl cosmic::Application for App {
                 self.showing_details = false;
             }
             Message::NewRow(multicast_message) => {
+                self.has_unsaved_changes = true;
                 let mut inserted = false;
                 self.all_rows.push(multicast_message.clone());
                 let query = self.search_query.trim().to_lowercase();
@@ -262,6 +270,7 @@ impl cosmic::Application for App {
                 return Task::batch([scroll_task, warning_task]);
             }
             Message::DataLoaded(rows) => {
+                self.has_unsaved_changes = false;
                 self.all_rows = rows.clone();
                 self.results_table_model.clear();
                 self.search_query.clear();
@@ -342,7 +351,12 @@ impl cosmic::Application for App {
                     match dialog.save_file().await {
                         Ok(response) => {
                             if let Some(url) = response.url() {
-                                Message::OutputFileSelected(url.path().to_owned())
+                                match url.to_file_path() {
+                                    Ok(path) => Message::OutputFileSelected(
+                                        path.to_string_lossy().to_string(),
+                                    ),
+                                    Err(_) => Message::ShowError("Invalid file path".to_string()),
+                                }
                             } else {
                                 Message::ShowError("File not created".to_string())
                             }
@@ -359,7 +373,13 @@ impl cosmic::Application for App {
                         .title("Load captured data".to_owned())
                         .filter(filter);
                     match dialog.open_file().await {
-                        Ok(response) => Message::LoadFile(response.url().path().to_owned()),
+                        Ok(response) => {
+                            if let Ok(path) = response.url().to_file_path() {
+                                Message::LoadFile(path.to_string_lossy().to_string())
+                            } else {
+                                Message::ShowError("Invalid file path".to_string())
+                            }
+                        }
                         Err(cosmic::dialog::file_chooser::Error::Cancelled) => Message::NoOp,
                         Err(e) => Message::ShowError(format!("File load error: {}", e.to_string())),
                     }
@@ -367,6 +387,7 @@ impl cosmic::Application for App {
             }
             Message::OutputFileSelected(url) => {
                 let rows = self.all_rows.clone();
+                self.has_unsaved_changes = false;
 
                 return cosmic::task::future(async move {
                     // Message::NoOp
@@ -377,10 +398,9 @@ impl cosmic::Application for App {
                     result.unwrap_or(Message::ShowError("Failed to save file.".to_string()))
                 })
                 .map(Action::App);
+                // a bit premature but an attempt was made to save adn write to file here
             }
             Message::LoadFile(url) => {
-                let rows = self.all_rows.clone();
-
                 return cosmic::task::future(async move {
                     // Message::NoOp
                     let result = tokio::task::spawn_blocking(move || {
@@ -391,6 +411,25 @@ impl cosmic::Application for App {
                     result.unwrap_or(Message::ShowError("Failed to load file.".to_string()))
                 })
                 .map(Action::App);
+            }
+            Message::ConfirmClose => {
+                // No unsaved changes, safe to close
+                std::process::exit(0);
+            }
+            Message::WindowEvent(event) => {
+                if let Event::Window(window_event) = event {
+                    match window_event {
+                        cosmic::iced::window::Event::CloseRequested => {
+                            if self.has_unsaved_changes {
+                                self.dialog_message = "You have unsaved changes. Are you sure you want to exit without saving?".to_string();
+                                self.dialog_type = DialogType::Confirm;
+                            } else {
+                                std::process::exit(0);
+                            }
+                        }
+                        _ => (),
+                    }
+                }
             }
         }
 
@@ -442,7 +481,12 @@ impl cosmic::Application for App {
         vec![menu.into()]
     }
     fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
-        cosmic::iced::Subscription::run(listener::Listener::start)
+        let close_event_handler =
+            event::listen_with(|event, _, _id| Some(Message::WindowEvent(event)));
+        Subscription::batch(vec![
+            cosmic::iced::Subscription::run(listener::Listener::start),
+            close_event_handler,
+        ])
     }
 
     fn view(&self) -> cosmic::Element<'_, Self::Message> {
@@ -601,6 +645,15 @@ impl cosmic::Application for App {
                     .body(&self.dialog_message)
                     // .icon(icon::from_name("dialog-warning-symbolic"))
                     .primary_action(button::text("Ok").on_press(Message::CloseDialog))
+                    .into();
+                Some(dialog)
+            }
+            DialogType::Confirm => {
+                let dialog = cosmic::widget::dialog::dialog()
+                    .title("Confirm")
+                    .body(&self.dialog_message)
+                    .primary_action(button::destructive("Yes").on_press(Message::ConfirmClose))
+                    .secondary_action(button::text("No").on_press(Message::NoOp))
                     .into();
                 Some(dialog)
             }
