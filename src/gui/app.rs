@@ -95,15 +95,17 @@ pub enum Message {
     DataLoad,
     OutputFileSelected(String),
     LoadFile(String),
-    ConfirmClose,
+    CloseConfirmed,
     DataLoaded(Vec<MulticastMessage>),
     WindowEvent(Event),
+    Exit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileMenuAction {
     DataSave,
     DataLoad,
+    Exit,
 }
 
 impl MenuAction for FileMenuAction {
@@ -112,6 +114,7 @@ impl MenuAction for FileMenuAction {
         match self {
             FileMenuAction::DataSave => Message::DataSave,
             FileMenuAction::DataLoad => Message::DataLoad,
+            FileMenuAction::Exit => Message::CloseConfirmed,
         }
     }
 }
@@ -412,7 +415,7 @@ impl cosmic::Application for App {
                 })
                 .map(Action::App);
             }
-            Message::ConfirmClose => {
+            Message::CloseConfirmed => {
                 // No unsaved changes, safe to close
                 std::process::exit(0);
             }
@@ -424,11 +427,21 @@ impl cosmic::Application for App {
                                 self.dialog_message = "You have unsaved changes. Are you sure you want to exit without saving?".to_string();
                                 self.dialog_type = DialogType::Confirm;
                             } else {
-                                std::process::exit(0);
+                                return Task::done(Message::CloseConfirmed).map(Action::App);
                             }
                         }
                         _ => (),
                     }
+                }
+            }
+            Message::Exit => {
+                if self.has_unsaved_changes {
+                    self.dialog_message =
+                        "You have unsaved changes. Are you sure you want to exit without saving?"
+                            .to_string();
+                    self.dialog_type = DialogType::Confirm;
+                } else {
+                    return Task::done(Message::CloseConfirmed).map(Action::App);
                 }
             }
         }
@@ -474,6 +487,8 @@ impl cosmic::Application for App {
                 vec![
                     menu::Item::Button("Save Data", None, FileMenuAction::DataSave),
                     menu::Item::Button("Load Data", None, FileMenuAction::DataLoad),
+                    menu::Item::Divider,
+                    menu::Item::Button("Exit", None, FileMenuAction::Exit),
                 ],
             ),
         )]);
@@ -652,7 +667,7 @@ impl cosmic::Application for App {
                 let dialog = cosmic::widget::dialog::dialog()
                     .title("Confirm")
                     .body(&self.dialog_message)
-                    .primary_action(button::destructive("Yes").on_press(Message::ConfirmClose))
+                    .primary_action(button::destructive("Yes").on_press(Message::CloseConfirmed))
                     .secondary_action(button::text("No").on_press(Message::NoOp))
                     .into();
                 Some(dialog)
