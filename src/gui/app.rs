@@ -331,7 +331,12 @@ impl cosmic::Application for App {
                     }
                 }
             }
-            Message::QueryEdit(query) => self.search_query = query,
+            Message::QueryEdit(query) => {
+                self.search_query = query;
+                if self.search_query.is_empty() {
+                    return Task::done(Message::SearchQuery("".to_owned())).map(Action::App);
+                }
+            }
             Message::DetailedOutputEdit(action) => {
                 if !action.is_edit() {
                     self.detailed_output.perform(action);
@@ -513,7 +518,8 @@ impl cosmic::Application for App {
             .spacing(50)
             .on_press_maybe(send_command);
         let data_text_input = text_input("Type ASCII data to send", &self.send_data)
-            .on_input(Message::TestDataChange);
+            .on_input(Message::TestDataChange)
+            .on_submit(|_| Message::SendData);
         let row_ascii_view = text_editor(&self.ascii_output)
             .font(Font::MONOSPACE)
             .wrapping(cosmic::iced_core::text::Wrapping::WordOrGlyph)
