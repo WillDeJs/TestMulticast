@@ -8,6 +8,7 @@ use crate::{
         util::{net_util_data_ascii, net_util_data_hexdump},
     },
 };
+use cosmic::dialog::file_chooser::{self, FileFilter};
 use cosmic::{
     Action,
     iced::Subscription,
@@ -32,12 +33,8 @@ use cosmic::{
         search_input, text, text_editor, text_input,
     },
 };
-use cosmic::{
-    dialog::file_chooser::{self, FileFilter},
-    iced::Event,
-};
-use cosmic::{iced::event, widget::menu::action::MenuAction};
 use cosmic::{iced::id, widget::scrollable};
+use cosmic::{iced::window, widget::menu::action::MenuAction};
 
 const MAX_PACKET_COUNT: usize = 1000;
 pub struct App {
@@ -96,8 +93,8 @@ pub enum Message {
     OutputFileSelected(String),
     LoadFile(String),
     CloseConfirmed,
+    CloseCancelled,
     DataLoaded(Vec<MulticastMessage>),
-    WindowEvent(Event),
     Exit,
 }
 
@@ -114,7 +111,7 @@ impl MenuAction for FileMenuAction {
         match self {
             FileMenuAction::DataSave => Message::DataSave,
             FileMenuAction::DataLoad => Message::DataLoad,
-            FileMenuAction::Exit => Message::CloseConfirmed,
+            FileMenuAction::Exit => Message::Exit,
         }
     }
 }
@@ -419,20 +416,9 @@ impl cosmic::Application for App {
                 // No unsaved changes, safe to close
                 std::process::exit(0);
             }
-            Message::WindowEvent(event) => {
-                if let Event::Window(window_event) = event {
-                    match window_event {
-                        cosmic::iced::window::Event::CloseRequested => {
-                            if self.has_unsaved_changes {
-                                self.dialog_message = "You have unsaved changes. Are you sure you want to exit without saving?".to_string();
-                                self.dialog_type = DialogType::Confirm;
-                            } else {
-                                return Task::done(Message::CloseConfirmed).map(Action::App);
-                            }
-                        }
-                        _ => (),
-                    }
-                }
+            Message::CloseCancelled => {
+                self.dialog_type = DialogType::None;
+                self.dialog_message.clear();
             }
             Message::Exit => {
                 if self.has_unsaved_changes {
@@ -496,11 +482,10 @@ impl cosmic::Application for App {
         vec![menu.into()]
     }
     fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
-        let close_event_handler =
-            event::listen_with(|event, _, _id| Some(Message::WindowEvent(event)));
+        let close_requests = window::close_requests().map(|_id| Message::Exit);
         Subscription::batch(vec![
             cosmic::iced::Subscription::run(listener::Listener::start),
-            close_event_handler,
+            close_requests,
         ])
     }
 
@@ -668,7 +653,7 @@ impl cosmic::Application for App {
                     .title("Confirm")
                     .body(&self.dialog_message)
                     .primary_action(button::destructive("Yes").on_press(Message::CloseConfirmed))
-                    .secondary_action(button::text("No").on_press(Message::NoOp))
+                    .secondary_action(button::text("No").on_press(Message::CloseCancelled))
                     .into();
                 Some(dialog)
             }
