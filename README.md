@@ -7,7 +7,7 @@ You will also have the ability to send simple test messages to ensure your machi
 ![Start-up Screenshot](/assets/mctest_one.png)
 
 ## Limitations
-This tool is very simple thus it's very limited on the features it provides. It does not replace Wireshark. It does not offer you the ability to capture all packets in the network. It is limited to capturing UDP Multicast packets only. It will not allow you to save a capture or run it for days uninterrupted. 
+This tool is very simple thus it's very limited on the features it provides. It does not replace Wireshark. It does not offer you the ability to capture all packets in the network. It is limited to capturing UDP Multicast packets only. It will not allow you to run it for days uninterrupted. 
 
 The main purpose of this tool is to test the ability to receive and send multicast messages on a given machine. This tool was simply born from the need of said tool while troubleshooting on site. It is meant to be a lightweight replacement for VLC stream testing.
 
@@ -36,3 +36,6 @@ Optionally you can type filtering test in the search box. Press enter to search.
 
 
 ![Capture Screenshot](/assets/mctest_three.png)
+
+### Collect Data for Later Analysis
+Once collected, you can click on the <strong>File</strong> menu and select <strong>Save Data</strong>. This produces a CSV file with the captured message logged as a hex dump. This file can be later loaded using the <strong>File</Strong> > <strong>Load Data </Strong> menu.
